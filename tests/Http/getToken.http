@@ -1,0 +1,11 @@
+POST http://127.0.0.1:8000/api/autenticacao
+Accept: application/json
+Content-Type: application/x-www-form-urlencoded
+
+{
+    "grant_type" : "authorization_code",
+    "client_id" : 5484426924579450,
+    "client_secret" : "3mPpFam7ssRUHVQ7NPTYR5rqseYH2yHI",
+    "code" : "TG-61938e73555ee8001a744464-194217521",
+    "redirect_uri" : "http://localhost:8000/api"
+}

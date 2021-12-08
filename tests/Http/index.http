@@ -1,0 +1,6 @@
+POST http://127.0.0.1:8000/api/ordens
+Content-Type: application/json
+
+{
+    "order" : 5009136472
+}

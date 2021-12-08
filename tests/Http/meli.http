@@ -1,0 +1,7 @@
+GET https://api.mercadolibre.com/orders/search
+# Content-Type: application/json
+Authorization: Bearer APP_USR-5484426924579450-111217-e9b59154522fb2026b7f0dbe958b9b67-194217521
+
+{
+    
+}

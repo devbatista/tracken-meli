@@ -1,0 +1,250 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Validator;
+use App\Models\Credential;
+
+class ApiController extends Controller
+{
+    public $access_token;
+    public $app_id;
+    public $secret_code;
+    public $redirect_uri;
+    public $credentials;
+
+    public function __construct()
+    {
+	    $this->credentials = Credential::select('access_token', 'app_id', 'client_secret', 'redirect_uri', 'code')->first();
+        $this->app_id = '5484426924579450';
+        $this->secret_code = '3mPpFam7ssRUHVQ7NPTYR5rqseYH2yHI';
+        $this->redirect_uri = 'http://localhost:8000/api';
+	    $this->access_token = 'Bearer APP_USR-5484426924579450-111610-206de81575907d60e0c78b0c8024ca8d-194217521';
+    }
+
+    public function enviarPedido(Request $request)
+    {
+        $retorno = ['error' => '', 'list' => []];
+        $data = $request->all();
+
+        $validator = Validator::make($data, [
+            'cnpjCpfTransportadora' => 'required|string',
+            'codigointerno' => 'required|string',
+            'idEnvio' => 'required|string',
+            'idVenda' => 'required|string',
+            'dtCriacao' => 'required|string',
+            'vlPago' => 'required|string',
+            'peso' => 'required|integer',
+            'vlFrete' => 'required|string',
+            'comentarios' => 'nullable|string',
+            'tipoEndereco' => 'required|string',
+            'cnpjCpfVendedor' => 'required|string',
+            'cliente' => 'required|string',
+            'razaoSocial' => 'nullable|string',
+            'localretirada' => 'required|string',
+            'numeroRetirada' => 'required|string',
+            'complementoRetirada' => 'nullable|string',
+            'bairroRetirada' => 'nullable|string',
+            'cidadeRetirada' => 'required|string',
+            'estadoRetirada' => 'required|string|max:2',
+            'cepVendedor' => 'required|string',
+            'cnpfCpfComprador' => 'required|string',
+            'nomeComprador' => 'required|string',
+            'enderecoEntrega' => 'required|string',
+            'bairroEntrega' => 'required|string',
+            'cidadeEntrega' => 'required|string',
+            'estadoEntrega' => 'required|string',
+            'cepEntrega' => 'required|string',
+            'telefoneComprador' => 'nullable|string',
+            'codServico' => 'nullable|string',
+            'codCliente' => 'required|string',
+            'regiaoOrigem' => 'nullable|string',
+            'regiaoDestino' => 'nullable|string',
+            'ieVendedor' => 'nullable|string',
+            'chave_nf' => 'nullable|string',
+            'ieComprador' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            $retorno['error'] = $validator->errors();
+            return $retorno;
+        }
+
+        $data['dtCriacao'] = date('Y-m-d H:i:s', strtotime($data['dtCriacao']));
+    }
+
+    public function index(Request $request)
+    {
+        $data = $request->only('code');
+
+        Credential::where(['id' => 1])->update(['code' => $data['code']]);
+        $this->credentials = Credential::select('access_token', 'app_id', 'redirect_uri', 'client_secret', 'code')->first();
+
+        $response = Http::withoutVerifying()->withHeaders([
+            'Content-Type' => 'application/x-www-form-wrlencoded',
+            'Accept' => 'application/json',
+        ])->post('https://api.mercadolibre.com/oauth/token', [
+            'grant_type' => 'authorization_code',
+            'client_id' => $this->credentials->app_id,
+            'client_secret' => $this->credentials->client_secret,
+            'code' => $this->credentials->code,
+            'redirect_uri' => $this->credentials->redirect_uri,
+        ]);
+
+        $data = json_decode($response->body());
+
+        if (isset($data->status) && $data->status == 400) {
+            return 'Gere o código novamente';
+        }
+
+        Credential::where(['id' => 1])->update(['access_token' => 'Bearer ' . $data->access_token]);
+
+        return $data;
+    }
+
+    public function billingData()
+    {
+        $response = Http::withoutVerifying()
+            ->withHeaders([
+                'Authorization' => 'Bearer ' . $this->credentials->access_token,
+            ])
+            ->get('https://api.mercadolibre.com/users/me');
+
+        return $response->body();
+    }
+
+    public function getToken(Request $request)
+    {
+        $data = $request->all();
+
+        $response = Http::withoutVerifying()->withHeaders([
+            'Content-Type' => 'application/x-www-form-urlencoded',
+            'Accept' => 'application/json'
+        ])->post('https://api.mercadolibre.com/oauth/token', [
+            'grant_type' => $data['grant_type'],
+            'client_id' => $data['client_id'],
+            'client_secret' => $data['client_secret'],
+            'code' => $data['code'],
+            'redirect_uri' => $data['redirect_uri'],
+        ]);
+
+        return $response->body();
+    }
+
+    public function getOrders(Request $request)
+    {
+        $order = $request->only('order');
+
+        $response = Http::withoutVerifying()->withHeaders([
+            'Content-Type' => 'application/json',
+            'Authorization' => $this->credentials->access_token,
+        ])->get('https://api.mercadolibre.com/orders/' . $order['order']);
+
+        $data = json_decode($response->body());
+
+        if (isset($data->error)) {
+            return $data;
+        }
+
+        $dtCriacao = str_replace('T', ' ', $data->date_created);
+        $dtCriacao = explode('.', $dtCriacao);
+
+        $vendedor = $this->getPersonData($data->seller->id);
+        $enderecoVendedor = $this->getAddress($vendedor->address->zip_code);
+        $enderecoVendedor = json_decode($enderecoVendedor);
+
+        $comprador = $this->getPersonData($data->buyer->id);
+
+        if (isset($comprador->address->address)) {
+            $enderecoComprador = $this->getAddress($comprador->address->zip_code);
+        } else {
+            $enderecoComprador = [
+                'endereco' => null,
+                'bairro' => null,
+                'localidade' => null,
+                'uf' => null,
+                'cep' => null,
+            ];
+        }
+
+        $enderecoComprador = (object)$enderecoComprador;
+
+        $cpfCnpjComprador = (isset($comprador->identification->number)) ? $comprador->identification->number : null;
+
+        $retorno = [
+            'cnpjCpfTransportadora' => '',
+            'codigointerno' => '',
+            'idEnvio' => $data->shipping->id,
+            'idVenda' => '',
+            'dtCriacao' => date('Y-m-d H:i:s', strtotime($dtCriacao[0])),
+            'vlPago' => 'R$ ' . number_format($data->total_amount, 2, ',', ''),
+            'peso' => '',
+            'vlFrete' => '',
+            'comentarios' => $data->comment,
+            'tipoEndereco' => '',
+            'cnpjCpfVendedor' => $vendedor->identification->number,
+            'cliente' => $vendedor->first_name . ' ' . $vendedor->last_name,
+            'razaoSocial' => '',
+            'localretirada' => $vendedor->address->address,
+            'numeroRetirada' => '',
+            'complementoRetirada' => '',
+            'bairroRetirada' => $enderecoVendedor->bairro,
+            'cidadeRetirada' => $enderecoVendedor->localidade,
+            'estadoRetirada' => $enderecoVendedor->uf,
+            'cepVendedor' => $enderecoVendedor->cep,
+            'cnpfCpfComprador' => $cpfCnpjComprador,
+            'nomeComprador' => $data->buyer->first_name . ' ' . $data->buyer->last_name,
+            'enderecoEntrega' => $enderecoComprador->endereco,
+            'bairroEntrega' => $enderecoComprador->bairro,
+            'cidadeEntrega' => $enderecoComprador->localidade,
+            'estadoEntrega' => $enderecoComprador->uf,
+            'cepEntrega' => $enderecoComprador->cep,
+            'telefoneComprador' => $data->buyer->phone->number,
+            'codServico' => '',
+            'codCliente' => '',
+            'regiaoOrigem' => '',
+            'regiaoDestino' => '',
+            'ieVendedor' => '',
+            'chave_nf' => '',
+            'ieComprador' => '',
+        ];
+
+        // $retorno = json_encode($retorno);
+
+        return $retorno;
+    }
+
+    private function getPersonData($id)
+    {
+        $response = Http::withoutVerifying()
+            ->withHeaders([
+                'Authorization' => $this->access_token,
+            ])
+            ->get('https://api.mercadolibre.com/users/' . $id);
+
+        return json_decode($response);
+    }
+
+    private function getAddress($cep)
+    {
+        $response = Http::withoutVerifying()
+            ->get('https://viacep.com.br/ws/' . $cep . '/json');
+
+        return $response;
+    }
+
+    public function createTestUser()
+    {
+        $response = Http::withoutVerifying()->withHeaders([
+            'Authorization' => $this->access_token,
+            'Content-Type' => 'application/json'
+        ])->post('https://api.mercadolibre.com/users/test_user', [
+            "site_id" => "MLB"
+        ]);
+
+        return $response->body();
+    }
+}
